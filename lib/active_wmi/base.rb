@@ -352,6 +352,7 @@ module ActiveWmi
           return nil unless options
           query = String.new()
           query = sanitize_wql(options)
+          puts "NOW, we'll execute this: #{query}"
           return query
         end
         # Accepts an array, hash, or string of sql conditions and sanitizes
@@ -376,7 +377,7 @@ module ActiveWmi
         #     # => "age BETWEEN 13 AND 18"
         def sanitize_sql_hash(attrs)
           conditions = attrs.map do |attr, value|
-            true_attr = column_aliases.has_key?(attr) ? column_aliases[attr] | attr
+            true_attr = column_aliases.has_key?(attr) ? column_aliases[attr] : attr
             "#{element_name}.#{true_attr} #{attribute_condition(value)}"
           end.join(' AND ')
           replace_bind_variables(conditions, attrs.values)
