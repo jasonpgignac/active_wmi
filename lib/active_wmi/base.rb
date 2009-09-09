@@ -94,6 +94,15 @@ module ActiveWmi
     cattr_accessor :logger
 
     class << self
+      def convert_to_windows_date_if_datetime(value)
+        return value unless value.respond_to?('strftime')
+        value.strftime("%Y%m%d%H%M%S.000000+***")
+      end
+      def convert_to_datetime_if_windows_date(value)
+        return value unless value.is_a?(String) 
+        return value unless value =~ /\A(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2}).(\d{4})/
+        DateTime.civil($1.to_i,$2.to_i,$3.to_i,$4.to_i,$5.to_i,$6.to_i)
+      end 
       # Gets the address of the WMI Server to connect for this class.  The 
       # site variable is required for Active Wmi's mapping to work. 
       def site
@@ -128,7 +137,6 @@ module ActiveWmi
           superclass.site.dup.freeze
         end
       end
-
       # Sets the namespace of the WMI resources to map for this class to the 
       # value in the +namespace+ argument. The namespace variable is required 
       # for Active WMI's mapping to work.
@@ -231,16 +239,18 @@ module ActiveWmi
         if (self.primary_key.is_a?(Array))
           key_selects = Array.new
           primary_key.each do |key|
-            key_selects << key.to_s + "=" + id.shift.to_s
+            f_id = id.shift
+            f_id = f_id.is_a?(String) ? "\"" + f_id + "\"" : f_id.to_s
+            key_selects << key.to_s + "=" + f_id
           end
           return self.element_name + "." + key_selects.join(",")
         else
           f_id = id.is_a?(String) ? "\"" + id + "\"" : id.to_s
-          return self.element_name + "." + self.primary_key + "=" + f_id
+          return self.element_name.to_s + "." + self.primary_key.to_s + "=" + f_id
         end
       end
 
-      # Gets the collection path for the REST resources.
+      # Gets the collection path for the ActiveWmi resources.
       # ==== Examples
       #   Computer.collection_path
       #   # => "SMS_R_System"
@@ -344,7 +354,7 @@ module ActiveWmi
           collection.collect! { |record| instantiate_record(record) }
         end
         def instantiate_record(record)
-          return new(record)
+          return new(connection.get(record.path_.path))
         end
         
         # Builds the query string for the request.
@@ -378,7 +388,7 @@ module ActiveWmi
         def sanitize_sql_hash(attrs)
           conditions = attrs.map do |attr, value|
             true_attr = column_aliases.has_key?(attr) ? column_aliases[attr] : attr
-            "#{element_name}.#{true_attr} #{attribute_condition(value)}"
+            "#{true_attr} #{attribute_condition(value)}"
           end.join(' AND ')
           replace_bind_variables(conditions, attrs.values)
         end
@@ -448,7 +458,10 @@ module ActiveWmi
     # INCOMPLETE - Does not work!
     def attributes
       unless(@attributes)
-        self.reload
+        @attributes = Hash.new()
+        self.properties_.each do |property|
+          @attributes[property.name] = property.value
+        end
       end
       @attributes
     end
@@ -480,6 +493,8 @@ module ActiveWmi
           end
         end
       end
+      self.attributes
+      self
     end
 
     # Returns a \clone of the resource that hasn't been assigned an +id+ yet and
@@ -538,6 +553,10 @@ module ActiveWmi
         return nil if  (id == "")
       end
       return id
+    end
+    
+    def primary_key
+      self.class.primary_key
     end
 
     # INCOMPLETE - Haven't tested this at all, even a little bit
@@ -708,6 +727,7 @@ module ActiveWmi
       attributes.to_json(options)
     end
 
+    # INCOPMLETE - Doesn't work
     # A method to \reload the attributes of this object from the remote web service.
     #
     # ==== Examples
@@ -720,9 +740,14 @@ module ActiveWmi
     #   my_branch.reload
     #   my_branch.name # => "Wilson Road"
     def reload
-      self.load(self.class.find(to_param).attributes)
+      @attributes = Hash.new()
+      @wmi_object = self.class.find(self.to_param).wmi_object
+      self.properties_.each do |property|
+        @attributes[property.name] = property.value
+      end
     end
 
+    # INCOMPLETE = Doesn't work
     # A method to manually load attributes from a \hash. Recursively loads collections of
     # resources.  This method is called in +initialize+ and +create+ when a \hash of attributes
     # is provided.
@@ -821,11 +846,20 @@ module ActiveWmi
         self.class.column_aliases
       end
       def method_missing(method_symbol, *arguments) #:nodoc:
+        if (method_symbol.to_s =~ /(.*)=\Z/)
+          method_symbol =$1.to_sym
+          setter = true
+        end
         if (column_aliases.key?(method_symbol))
           method_symbol = column_aliases[method_symbol]
         end
-        method_name = method_symbol.to_s
-        wmi_object.send(method_name, *arguments)
+        method_name = method_symbol.to_s + (setter ? "=" : "")
+        arguments.map! do |arg|
+          self.class.convert_to_windows_date_if_datetime(arg)
+        end
+        response = wmi_object.send(method_name, *arguments)
+        #INCOMPLETE - Should parse through structures, as well (Hashes, Arrays)
+        self.class.convert_to_datetime_if_windows_date(response)
       end
 
   end

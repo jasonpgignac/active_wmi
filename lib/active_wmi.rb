@@ -32,11 +32,10 @@ rescue LoadError
 end
 
 require 'active_wmi/base'
-require 'active_wmi/validations'
+require 'active_wmi/transient'
 
 module ActiveWmi
   require 'win32ole'
   Base.class_eval do
-    include Validations
   end
 end
